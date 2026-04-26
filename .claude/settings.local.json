@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(gh repo *)",
+      "Bash(gh release *)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:api.github.com)",
+      "Bash(rustc --version)",
+      "Bash(xcode-select -p)",
+      "Bash(mv \"/Users/poofphyphyllite/Desktop/Fisch Macro\" \"/Users/poofphyphyllite/Downloads/\")",
+      "Bash(mv \"/Users/poofphyphyllite/.claude/projects/-Users-poofphyphyllite-Desktop-Fisch-Macro\" \"/Users/poofphyphyllite/.claude/projects/-Users-poofphyphyllite-Downloads-Fisch-Macro\")",
+      "Read(//Users/poofphyphyllite/Downloads/**)"
+    ]
+  }
+}
