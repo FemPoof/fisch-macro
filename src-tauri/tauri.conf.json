@@ -15,8 +15,8 @@
       {
         "label": "main",
         "title": "fisch-macro",
-        "width": 800,
-        "height": 600
+        "width": 880,
+        "height": 720
       },
       {
         "label": "overlay",
@@ -28,6 +28,23 @@
         "skipTaskbar": true,
         "resizable": false,
         "maximized": true,
+        "visible": false,
+        "shadow": false,
+        "focus": false
+      },
+      {
+        "label": "status",
+        "url": "/status",
+        "title": "fisch status",
+        "width": 240,
+        "height": 200,
+        "x": 20,
+        "y": 60,
+        "transparent": true,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": false,
         "visible": false,
         "shadow": false,
         "focus": false
@@ -52,7 +69,7 @@
   "plugins": {
     "updater": {
       "endpoints": [
-        "https://github.com/FemPoof/fisch-macro-releases/releases/latest/download/latest.json"
+        "https://github.com/FemPoof/fisch-macro/releases/latest/download/latest.json"
       ],
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IERDNUJBNEFGRjQxMTY2OTIKUldTU1poSDByNlJiM0IvUktjdWUydnRua240ZG9IMEVOeWpvSENvM2VLVHVlcnpwcWIxUGpZMm8K"
     }

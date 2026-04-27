@@ -1,14 +1,16 @@
 # Builds .dmg (macOS) and .msi (Windows) installers, signs them with the
-# Tauri updater key, creates a GitHub release on the PUBLIC fisch-macro-releases
-# repo, and uploads the artifacts + a `latest.json` manifest the running app
-# fetches to detect new versions.
+# Tauri updater key, creates a GitHub release on THIS repo, and uploads
+# the artifacts + a `latest.json` manifest the running app fetches to
+# detect new versions.
 #
-# Trigger: pushing a tag like `v0.2.0` to this (private) repo.
+# Trigger: pushing a tag like `v0.2.0`.
 # Required secrets (Settings → Secrets and variables → Actions):
-#   TAURI_SIGNING_PRIVATE_KEY        — the contents of ~/.tauri/fisch-macro.key
+#   TAURI_SIGNING_PRIVATE_KEY          — the contents of ~/.tauri/fisch-macro.key
 #   TAURI_SIGNING_PRIVATE_KEY_PASSWORD — the password you set when generating the key
-#   RELEASES_REPO_TOKEN              — a fine-grained PAT with "Contents: write"
-#                                      access to FemPoof/fisch-macro-releases
+#
+# `GITHUB_TOKEN` is automatically provided by Actions and has the
+# `contents: write` permission scoped via the `permissions:` block below.
+# No PAT needed — release publishing happens in the same repo.
 
 name: release
 
@@ -93,6 +95,8 @@ jobs:
   publish:
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -107,7 +111,7 @@ jobs:
           set -e
           VERSION="${GITHUB_REF_NAME#v}"
           NOTES="${GITHUB_REF_NAME} release"
-          PUB_BASE="https://github.com/FemPoof/fisch-macro-releases/releases/download/${GITHUB_REF_NAME}"
+          PUB_BASE="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}"
 
           # Find the macOS .app.tar.gz + signature (arm64 preferred for Apple Silicon)
           MAC_ARM_SIG=$(cat artifacts/bundle-macos-arm64/*.app.tar.gz.sig 2>/dev/null | head -1 || echo "")
@@ -144,7 +148,7 @@ jobs:
 
       - name: Publish release
         env:
-          GH_TOKEN: ${{ secrets.RELEASES_REPO_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
           set -e
@@ -158,9 +162,9 @@ jobs:
           cp latest.json upload/
           ls -la upload/
 
-          # Create the release on the public releases repo and upload everything
+          # Create the release on this repo and upload everything. GH_TOKEN
+          # is the auto-provided GITHUB_TOKEN, scoped to this repo only.
           gh release create "$VERSION" \
-            --repo FemPoof/fisch-macro-releases \
             --title "$VERSION" \
             --notes "Automated release of fisch-macro $VERSION" \
             upload/*

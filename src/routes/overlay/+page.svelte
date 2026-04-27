@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import { Window, getCurrentWindow } from "@tauri-apps/api/window";
   import { invoke } from "@tauri-apps/api/core";
+  import { listen } from "@tauri-apps/api/event";
   import {
     loadRegions,
     saveRegions,
@@ -34,32 +35,155 @@
     startRegion: Region;
   } | null>(null);
 
+  // Frozen-screen background. When the overlay opens we capture a snapshot
+  // of the desktop and render it as a static <img> behind the region UI.
+  // Solves the "GUIs disappear too fast / I have to tab around" problem
+  // the user described — the picker always shows the screen state at the
+  // moment F1 was pressed, even if underlying apps re-render.
+  let freezeUrl = $state<string | null>(null);
+  let freezeImg = $state<HTMLImageElement | null>(null);
+  // Magnifier state — follows cursor, samples the freeze image at higher
+  // zoom for pixel-precise region picking. Always on whenever a freeze
+  // exists; user explicitly asked to remove the toggle.
+  let magX = $state(0);
+  let magY = $state(0);
+  let magCanvas: HTMLCanvasElement | null = $state(null);
+  // Magnifier display size + zoom factor. 8× zoom on a 180px window means
+  // each rendered "pixel" is 8 actual pixels — same magnification class
+  // as Hydra's example screenshot.
+  const MAG_SIZE = 180;
+  const MAG_ZOOM = 8;
+  // Hex sampled under the cursor — shown as a label on the magnifier so
+  // the user can read the exact pixel color for manual hex entry without
+  // having to save a PNG and use a separate eyedropper.
+  let magHex = $state<string>("");
+
   // While this overlay is open, region coordinates are stored as
   // OVERLAY-RELATIVE PHYSICAL pixels (so display = stored * scale, no
   // offsets needed). Persistent storage on disk uses SCREEN-ABSOLUTE
   // PHYSICAL coords; we convert in/out via the overlay's outer position
   // on load/save/capture.
 
-  onMount(async () => {
-    await refreshScale();
-    await refreshDebug();
-    window.addEventListener("resize", async () => {
-      await refreshScale();
-      await refreshDebug();
+  onMount(() => {
+    // Re-capture every time the overlay window is shown again. Without
+    // this, the overlay window — which is created hidden at app launch
+    // and reused on every F1 press — keeps reusing the launch-time
+    // screenshot. That produced the "freeze is from a minute ago and
+    // doesn't line up" report from the user.
+    const unlistenP = listen("overlay-shown", async () => {
+      await refreshFreeze();
     });
 
-    const cfg = await loadRegions();
-    const offset = await currentOriginLogical();
-    for (const k of KEYS) {
-      const r = cfg[k];
-      if (r) {
-        regions[k] = {
-          ...r,
-          x: r.x - offset.x,
-          y: r.y - offset.y,
-        };
+    (async () => {
+      await refreshScale();
+      await refreshDebug();
+      window.addEventListener("resize", async () => {
+        await refreshScale();
+        await refreshDebug();
+      });
+      // Capture the freeze BEFORE drawing existing regions so the picker
+      // appears with the static snapshot immediately on first show.
+      await refreshFreeze();
+
+      const cfg = await loadRegions();
+      const offset = await currentOriginLogical();
+      for (const k of KEYS) {
+        const r = cfg[k];
+        if (r) {
+          regions[k] = {
+            ...r,
+            x: r.x - offset.x,
+            y: r.y - offset.y,
+          };
+        }
       }
+    })();
+
+    return () => {
+      unlistenP.then((u) => u()).catch(() => {});
+    };
+  });
+
+  async function refreshFreeze() {
+    try {
+      // Use a base64 data URL — sidesteps Tauri 2's asset-protocol
+      // requirement (which would otherwise block file:// loads from the
+      // webview). Data URLs also work cleanly inside drawImage.
+      const dataUrl = await invoke<string>("capture_full_screen_data_url");
+      // Pre-load into an <Image> so the magnifier canvas can draw it
+      // synchronously on every cursor move. Without this we'd have to
+      // wait for the browser to load it on first draw, which causes the
+      // "magnifier is empty" symptom from the user's report.
+      const img = new Image();
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve();
+        img.onerror = (e) => reject(e);
+        img.src = dataUrl;
+      });
+      freezeImg = img;
+      freezeUrl = dataUrl;
+    } catch (e) {
+      console.warn("freeze capture failed", e);
+      freezeUrl = null;
+      freezeImg = null;
     }
+  }
+
+  // Canvas-based magnifier. Drawing the zoomed pixels via drawImage with
+  // imageSmoothingEnabled=false is far more reliable than CSS background
+  // tricks (which silently fail on URL quoting / size calc edge cases —
+  // the symptom from the user's last test). Recomputed on every cursor
+  // move via $effect.
+  function paintMagnifier() {
+    if (!magCanvas || !freezeImg) return;
+    const ctx = magCanvas.getContext("2d");
+    if (!ctx) return;
+    ctx.imageSmoothingEnabled = false;
+    // Source rect: a small window centered on the cursor's pixel,
+    // sized so that when scaled to MAG_SIZE we get MAG_ZOOM× zoom.
+    const halfSrc = MAG_SIZE / (2 * MAG_ZOOM);
+    // Convert cursor CSS pixels → freeze-image pixels. The freeze image
+    // is at logical screen size, the overlay viewport is also at logical
+    // screen size (window = full screen), so the conversion is identity.
+    const srcX = magX - halfSrc;
+    const srcY = magY - halfSrc;
+    ctx.fillStyle = "#000";
+    ctx.fillRect(0, 0, MAG_SIZE, MAG_SIZE);
+    ctx.drawImage(
+      freezeImg,
+      srcX,
+      srcY,
+      halfSrc * 2,
+      halfSrc * 2,
+      0,
+      0,
+      MAG_SIZE,
+      MAG_SIZE
+    );
+    // Sample the pixel under the cursor for the hex label. Use a tiny
+    // 1×1 readback at the center of the canvas (= cursor pixel after
+    // the zoom).
+    try {
+      const px = ctx.getImageData(MAG_SIZE / 2, MAG_SIZE / 2, 1, 1).data;
+      magHex = `#${px[0].toString(16).padStart(2, "0")}${px[1]
+        .toString(16)
+        .padStart(2, "0")}${px[2].toString(16).padStart(2, "0")}`;
+    } catch {
+      magHex = "";
+    }
+  }
+
+  $effect(() => {
+    // Re-paint whenever the cursor moves, the freeze loads, or the canvas
+    // becomes available (canvas is rendered conditionally inside
+    // {#if freezeImg}, so its `bind:this` fires *after* freezeImg flips
+    // from null to an image — a previous bug where the first paint
+    // missed because the canvas wasn't bound yet).
+    magX;
+    magY;
+    freezeImg;
+    magCanvas;
+    paintMagnifier();
   });
 
   /// Overlay window's screen origin in LOGICAL pixels. Tauri's outerPosition
@@ -117,6 +241,10 @@
   }
 
   function onPointerMove(e: PointerEvent) {
+    // Update magnifier position on every move (cheap — just two reactive
+    // assignments), regardless of whether we're dragging a region.
+    magX = e.clientX;
+    magY = e.clientY;
     if (!dragging) return;
     const dxCss = e.clientX - dragging.startMouseX;
     const dyCss = e.clientY - dragging.startMouseY;
@@ -303,6 +431,64 @@
     if (selected === key) selected = null;
   }
 
+  // Manual hex assignment from the magnifier. The user hovers their
+  // cursor over a target pixel (e.g., the fish indicator line they want
+  // to track) and clicks one of these buttons — that pixel's hex gets
+  // written directly to the corresponding fish-color setting in main
+  // localStorage. Bypasses auto-cal entirely. Solves the long-running
+  // "auto-cal keeps picking the wrong target color" problem since auto-
+  // cal can't tell the fish indicator from track end-cap markers.
+  let pickStatus = $state<string>("");
+  function setMagAsFishColor(role: "target" | "arrow" | "left" | "right") {
+    if (!magHex || magHex.length < 7) {
+      pickStatus = "Move cursor over a pixel first.";
+      return;
+    }
+    const hex = magHex.replace(/^#/, "").toLowerCase();
+    // Sanity-check the role/hex combo. The Left/Right Bar are the white
+    // player-bar gradient; if the user accidentally hovers over the
+    // divider (dark navy ~#171734) and clicks "Set Left Bar", their
+    // bar detection breaks completely (this is the bug from log
+    // 1777257958 — both bar colors set to #171734, tot[L=0 R=0] forever).
+    const r = parseInt(hex.slice(0, 2), 16);
+    const g = parseInt(hex.slice(2, 4), 16);
+    const b = parseInt(hex.slice(4, 6), 16);
+    const minCh = Math.min(r, g, b);
+    if ((role === "left" || role === "right") && minCh < 150) {
+      pickStatus =
+        `Refused: #${hex} is too dark for the player bar (which should be near-white). ` +
+        `Hover over the WHITE part of the bar, not the dark divider.`;
+      return;
+    }
+    if (role === "arrow" && (minCh > 200 || minCh < 30)) {
+      pickStatus =
+        `Refused: #${hex} doesn't look like the arrow icon (mid-grey expected).`;
+      return;
+    }
+    const keyMap: Record<string, string> = {
+      target: "fishTargetHex",
+      arrow: "fishArrowHex",
+      left: "fishLeftHex",
+      right: "fishRightHex",
+    };
+    const k = keyMap[role];
+    try {
+      // Write to BOTH the live setting AND the saved-default snapshot so
+      // that Reset will return to this color and a future auto-cal Apply
+      // won't immediately overwrite it.
+      localStorage.setItem(`fm:${k}`, JSON.stringify(hex));
+      localStorage.setItem(`fm:default:${k}`, JSON.stringify(hex));
+      // Also widen the matching tol a bit so anti-aliased neighbors of
+      // this pixel still match — manually-picked single pixels are often
+      // the "ideal" color but actual rendered pixels vary by ±5-10.
+      const tolKey = `fm:${k.replace("Hex", "Tol")}`;
+      localStorage.setItem(tolKey, JSON.stringify(8));
+      pickStatus = `Set ${role} = #${hex} (tol 8). Close overlay & test.`;
+    } catch (e) {
+      pickStatus = `error: ${e}`;
+    }
+  }
+
   async function cancel() {
     // reload from disk to discard unsaved edits
     const cfg = await loadRegions();
@@ -313,12 +499,53 @@
   function onKey(e: KeyboardEvent) {
     if (e.key === "Escape") cancel();
     if (e.key === "Enter") saveAndClose();
+    if (e.key === "F1") {
+      e.preventDefault();
+      refreshFreeze();
+    }
+  }
+
+  // Position the magnifier to the side of the cursor so it doesn't hide
+  // what we're aiming at. Right side normally; flip to left if we're near
+  // the right edge. Vertical: clamp to the viewport.
+  function magPos(): { left: number; top: number } {
+    let left = magX + 24;
+    if (typeof window !== "undefined") {
+      if (left + MAG_SIZE > window.innerWidth - 12)
+        left = magX - MAG_SIZE - 24;
+    }
+    let top = magY - MAG_SIZE / 2;
+    if (top < 12) top = 12;
+    if (typeof window !== "undefined") {
+      if (top + MAG_SIZE > window.innerHeight - 12)
+        top = window.innerHeight - MAG_SIZE - 12;
+    }
+    return { left, top };
   }
 </script>
 
 <svelte:window on:pointermove={onPointerMove} on:pointerup={endDrag} on:keydown={onKey} />
 
 <div class="overlay" onpointerdown={() => (selected = null)}>
+  <!--
+    Freeze image is intentionally NOT rendered. It used to be drawn as a
+    full-screen <img> behind the region UI so the user could click on a
+    static snapshot. But on macOS the overlay window covers the work area
+    only (not the menu bar), while the screenshot is full-screen — when
+    the image stretches into the smaller window the menu bar pixels get
+    squished into the top, producing a ghosted "double menu bar" right
+    below the live one. Symptom from logs/screenshots before this fix.
+
+    Behavior change: user now sees the LIVE game underneath while
+    drawing region rectangles. Region picking still works (clicks on
+    rectangles, dragging edges) — they were always HTML overlays, not
+    drawn into the freeze. Pixel-precise selection on a moving game is
+    slightly less precise but most regions are big enough that this
+    doesn't matter. The freeze IMAGE is still loaded into memory
+    (freezeImg) so the magnifier canvas can sample from it for color
+    picking — that part is unaffected by removing the on-screen <img>.
+  -->
+
   {#each KEYS as key}
     {@const r = regions[key]}
     {#if r}
@@ -344,8 +571,30 @@
     {/if}
   {/each}
 
+  {#if freezeImg}
+    {@const mp = magPos()}
+    <div
+      class="magnifier-wrap"
+      style:left="{mp.left}px"
+      style:top="{mp.top}px"
+    >
+      <canvas
+        bind:this={magCanvas}
+        class="magnifier"
+        width={MAG_SIZE}
+        height={MAG_SIZE}
+      ></canvas>
+      <div class="mag-crosshair-h"></div>
+      <div class="mag-crosshair-v"></div>
+      {#if magHex}
+        <div class="mag-hex">{magHex}</div>
+      {/if}
+    </div>
+  {/if}
+
   <div class="toolbar" onpointerdown={(e) => e.stopPropagation()}>
     <div class="title">Region picker</div>
+    <div class="hint">F1 = re-snapshot · Enter = save · Esc = cancel</div>
     {#each KEYS as key}
       {@const r = regions[key]}
       <div class="row">
@@ -372,6 +621,29 @@
       <div class="status-line">{templateStatus}</div>
     {/if}
     <div class="hint">Drag inside a region to move; corners/edges resize.</div>
+
+    <div class="picker-panel">
+      <div class="picker-title">Color picker</div>
+      <div class="picker-hex">
+        Cursor pixel: <code>{magHex || "—"}</code>
+      </div>
+      <div class="picker-row">
+        <button class="picker-btn" onclick={() => setMagAsFishColor("target")}>Set Target Line</button>
+        <button class="picker-btn" onclick={() => setMagAsFishColor("arrow")}>Set Arrow</button>
+      </div>
+      <div class="picker-row">
+        <button class="picker-btn" onclick={() => setMagAsFishColor("left")}>Set Left Bar</button>
+        <button class="picker-btn" onclick={() => setMagAsFishColor("right")}>Set Right Bar</button>
+      </div>
+      {#if pickStatus}
+        <div class="status-line">{pickStatus}</div>
+      {/if}
+      <div class="hint" style="margin-top:4px;">
+        Most users only need <strong>Set Target Line</strong> — hover the
+        fish indicator line and click it. Don't touch the Bar buttons unless
+        the bar isn't being detected at all (rod has very dim bar).
+      </div>
+    </div>
   </div>
 </div>
 
@@ -389,9 +661,74 @@
     position: fixed;
     inset: 0;
     background: transparent;
-    cursor: default;
+    cursor: crosshair;
+  }
+  .freeze {
+    position: fixed;
+    inset: 0;
+    width: 100vw;
+    height: 100vh;
+    object-fit: fill;
+    pointer-events: none;
+    user-select: none;
+    z-index: 0;
+    /* No filter — show the freeze at faithful colors. Earlier we applied
+       brightness(0.85) to make region rectangles pop, but that darkened
+       the pixels visually for the user, making calibration of regions
+       harder (you're aligning to a dimmed scene that doesn't match the
+       live game). The magnifier reads the original image data, not the
+       darkened render, so its hex values are correct — but the user's
+       perception of where the bar is in the freeze was off. */
+  }
+  .magnifier-wrap {
+    position: fixed;
+    pointer-events: none;
+    z-index: 9999;
+    border: 2px solid white;
+    box-shadow: 0 0 0 1px black, 0 6px 18px rgba(0, 0, 0, 0.6);
+    border-radius: 50%;
+    overflow: hidden;
+    width: 180px;
+    height: 180px;
+  }
+  .magnifier {
+    display: block;
+    image-rendering: pixelated;
+  }
+  .mag-crosshair-h,
+  .mag-crosshair-v {
+    position: absolute;
+    background: rgba(255, 0, 0, 0.9);
+    pointer-events: none;
+  }
+  .mag-crosshair-h {
+    left: 0;
+    right: 0;
+    top: 50%;
+    height: 1px;
+    transform: translateY(-0.5px);
+  }
+  .mag-crosshair-v {
+    top: 0;
+    bottom: 0;
+    left: 50%;
+    width: 1px;
+    transform: translateX(-0.5px);
+  }
+  .mag-hex {
+    position: absolute;
+    bottom: 6px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0, 0, 0, 0.78);
+    color: white;
+    padding: 2px 8px;
+    border-radius: 3px;
+    font: 11px ui-monospace, "SF Mono", Menlo, monospace;
+    pointer-events: none;
   }
   .region {
+    z-index: 5;
     position: absolute;
     border: 2px solid var(--color);
     background: color-mix(in srgb, var(--color) 12%, transparent);
@@ -440,6 +777,12 @@
     font: 13px system-ui, sans-serif;
     min-width: 260px;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    z-index: 10;
+  }
+  .hint {
+    color: #888;
+    font-size: 11px;
+    margin-bottom: 6px;
   }
   .title {
     font-weight: 600;
@@ -487,5 +830,42 @@
     color: #4ade80;
     font-size: 11px;
     font-family: ui-monospace, monospace;
+  }
+  .picker-panel {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid #2a2a2a;
+  }
+  .picker-title {
+    font-weight: 600;
+    margin-bottom: 4px;
+    font-size: 12px;
+  }
+  .picker-hex {
+    margin-bottom: 6px;
+    font-size: 12px;
+    color: #ccc;
+  }
+  .picker-hex code {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    color: #fff;
+  }
+  .picker-row {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 4px;
+  }
+  .picker-btn {
+    flex: 1;
+    padding: 4px 6px;
+    font-size: 11px;
+    background: #1f3a5f;
+    border: 1px solid #2a4a72;
+    color: white;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+  .picker-btn:hover {
+    background: #2a4a72;
   }
 </style>
