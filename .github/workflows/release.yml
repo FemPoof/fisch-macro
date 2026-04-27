@@ -118,20 +118,15 @@ jobs:
               cp "$f" "dist/fisch-macro_${{ matrix.label }}.app.tar.gz.sig"
             done
           else
-            # Windows installers (one of these per matrix run)
+            # Windows installers — these double as the updater payload
+            # in modern Tauri 2 (no separate .zip wrapper anymore). The
+            # accompanying .sig files are what the auto-updater
+            # verifies. createUpdaterArtifacts: true in tauri.conf.json
+            # is what triggers .sig generation.
             cp $BUNDLE/msi/*.msi dist/ 2>/dev/null || true
+            cp $BUNDLE/msi/*.msi.sig dist/ 2>/dev/null || true
             cp $BUNDLE/nsis/*.exe dist/ 2>/dev/null || true
-            # Updater bundles. Tauri 2's NSIS updater output is named
-            # *-setup.nsis.zip (older) OR *-setup.exe.zip (newer), so we
-            # match both. The MSI updater bundle is *.msi.zip. Each only
-            # exists when bundle.createUpdaterArtifacts is true in
-            # tauri.conf.json AND the matching target is built.
-            cp $BUNDLE/nsis/*.nsis.zip dist/ 2>/dev/null || true
-            cp $BUNDLE/nsis/*.nsis.zip.sig dist/ 2>/dev/null || true
-            cp $BUNDLE/nsis/*.exe.zip dist/ 2>/dev/null || true
-            cp $BUNDLE/nsis/*.exe.zip.sig dist/ 2>/dev/null || true
-            cp $BUNDLE/msi/*.msi.zip dist/ 2>/dev/null || true
-            cp $BUNDLE/msi/*.msi.zip.sig dist/ 2>/dev/null || true
+            cp $BUNDLE/nsis/*.exe.sig dist/ 2>/dev/null || true
           fi
           ls -la dist/
 
@@ -176,15 +171,11 @@ jobs:
           MAC_X64_FILE=$(basename "$(ls artifacts/bundle-macos-x64/*macos-x64.app.tar.gz 2>/dev/null | head -1)" 2>/dev/null || echo "")
           MAC_X64_SIG=$(cat artifacts/bundle-macos-x64/*macos-x64.app.tar.gz.sig 2>/dev/null | head -1 || echo "")
 
-          # Windows updater bundle — match either .exe.zip (current Tauri
-          # 2 naming) or .nsis.zip (older naming) so this works across
-          # Tauri version bumps.
-          WIN_FILE=$(basename "$(ls artifacts/bundle-windows-x64/*.exe.zip 2>/dev/null | head -1)" 2>/dev/null || echo "")
-          WIN_SIG=$(cat artifacts/bundle-windows-x64/*.exe.zip.sig 2>/dev/null | head -1 || echo "")
-          if [ -z "$WIN_FILE" ]; then
-            WIN_FILE=$(basename "$(ls artifacts/bundle-windows-x64/*.nsis.zip 2>/dev/null | head -1)" 2>/dev/null || echo "")
-            WIN_SIG=$(cat artifacts/bundle-windows-x64/*.nsis.zip.sig 2>/dev/null | head -1 || echo "")
-          fi
+          # Windows updater payload — modern Tauri 2 uses the NSIS .exe
+          # directly (no zip wrapper); the .exe.sig sidecar is the
+          # signature. The auto-updater downloads the .exe and runs it.
+          WIN_FILE=$(basename "$(ls artifacts/bundle-windows-x64/*-setup.exe 2>/dev/null | head -1)" 2>/dev/null || echo "")
+          WIN_SIG=$(cat artifacts/bundle-windows-x64/*-setup.exe.sig 2>/dev/null | head -1 || echo "")
 
           echo "Picked files: mac-arm=$MAC_ARM_FILE mac-x64=$MAC_X64_FILE win=$WIN_FILE"
 
@@ -220,11 +211,10 @@ jobs:
           VERSION="${GITHUB_REF_NAME}"
           # Flatten all bundle artifacts into one upload directory.
           mkdir -p upload
-          find artifacts -type f \( -name '*.dmg' -o -name '*.msi' -o -name '*.exe' \
-            -o -name '*.app.tar.gz' -o -name '*.app.tar.gz.sig' \
-            -o -name '*.nsis.zip' -o -name '*.nsis.zip.sig' \
-            -o -name '*.exe.zip' -o -name '*.exe.zip.sig' \
-            -o -name '*.msi.zip' -o -name '*.msi.zip.sig' \) -exec cp {} upload/ \;
+          find artifacts -type f \( -name '*.dmg' \
+            -o -name '*.msi' -o -name '*.msi.sig' \
+            -o -name '*.exe' -o -name '*.exe.sig' \
+            -o -name '*.app.tar.gz' -o -name '*.app.tar.gz.sig' \) -exec cp {} upload/ \;
           cp latest.json upload/
           ls -la upload/
 
