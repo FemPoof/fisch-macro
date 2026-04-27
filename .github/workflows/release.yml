@@ -1,7 +1,7 @@
-# Builds .dmg (macOS) and .msi (Windows) installers, signs them with the
-# Tauri updater key, creates a GitHub release on THIS repo, and uploads
-# the artifacts + a `latest.json` manifest the running app fetches to
-# detect new versions.
+# Builds .dmg (macOS) and .msi/.exe (Windows) installers, signs them with the
+# Tauri updater key, creates a GitHub release on THIS repo, and uploads the
+# artifacts + a `latest.json` manifest the running app fetches to detect new
+# versions.
 #
 # Trigger: pushing a tag like `v0.2.0`.
 # Required secrets (Settings → Secrets and variables → Actions):
@@ -59,6 +59,25 @@ jobs:
             src-tauri/target
           key: ${{ matrix.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
+      - name: Sync tauri.conf.json version with git tag
+        shell: bash
+        run: |
+          # Strip leading 'v' from the tag so e.g. v0.1.7 → 0.1.7.
+          # tauri.conf.json's `version` field controls bundle filenames
+          # (fisch-macro_0.1.7_aarch64.dmg etc.) AND the Cargo crate
+          # version. Keeping it in sync with the git tag means a release
+          # tagged v0.1.7 actually produces files named 0.1.7 instead
+          # of whatever was last committed to main.
+          VERSION="${GITHUB_REF_NAME#v}"
+          node -e "
+            const fs = require('fs');
+            const path = 'src-tauri/tauri.conf.json';
+            const c = JSON.parse(fs.readFileSync(path, 'utf8'));
+            c.version = '${VERSION}';
+            fs.writeFileSync(path, JSON.stringify(c, null, 2) + '\n');
+            console.log('tauri.conf.json version → ' + c.version);
+          "
+
       - name: Install frontend deps
         run: npm ci
 
@@ -68,21 +87,51 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npx tauri build --target ${{ matrix.target }}
 
+      - name: List bundle outputs (diagnostic)
+        shell: bash
+        run: |
+          # Dump everything under bundle/ so future workflow tweaks can
+          # see exactly what Tauri produced for each platform.
+          find src-tauri/target/${{ matrix.target }}/release/bundle -type f -printf '%p (%s bytes)\n' 2>/dev/null \
+            || find src-tauri/target/${{ matrix.target }}/release/bundle -type f 2>/dev/null \
+            || true
+
       - name: Collect artifacts
         shell: bash
         run: |
           mkdir -p dist
+          BUNDLE=src-tauri/target/${{ matrix.target }}/release/bundle
           if [[ "${{ matrix.os }}" == "macos-latest" ]]; then
-            cp src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg dist/ || true
-            cp src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz dist/ || true
-            cp src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz.sig dist/ || true
+            cp $BUNDLE/dmg/*.dmg dist/ 2>/dev/null || true
+            # Rename the macOS .app.tar.gz updater bundle to include the
+            # arch label. Without this, arm64 and x64 both produce a file
+            # called fisch-macro.app.tar.gz, and the publish step's
+            # flatten-all-into-one-dir clobbers one with the other —
+            # leaving one architecture's auto-update pointing at the
+            # wrong binary.
+            for f in $BUNDLE/macos/*.app.tar.gz; do
+              [ -e "$f" ] || continue
+              cp "$f" "dist/fisch-macro_${{ matrix.label }}.app.tar.gz"
+            done
+            for f in $BUNDLE/macos/*.app.tar.gz.sig; do
+              [ -e "$f" ] || continue
+              cp "$f" "dist/fisch-macro_${{ matrix.label }}.app.tar.gz.sig"
+            done
           else
-            cp src-tauri/target/${{ matrix.target }}/release/bundle/msi/*.msi dist/ || true
-            cp src-tauri/target/${{ matrix.target }}/release/bundle/msi/*.msi.zip dist/ || true
-            cp src-tauri/target/${{ matrix.target }}/release/bundle/msi/*.msi.zip.sig dist/ || true
-            cp src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe dist/ || true
-            cp src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.nsis.zip dist/ || true
-            cp src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.nsis.zip.sig dist/ || true
+            # Windows installers (one of these per matrix run)
+            cp $BUNDLE/msi/*.msi dist/ 2>/dev/null || true
+            cp $BUNDLE/nsis/*.exe dist/ 2>/dev/null || true
+            # Updater bundles. Tauri 2's NSIS updater output is named
+            # *-setup.nsis.zip (older) OR *-setup.exe.zip (newer), so we
+            # match both. The MSI updater bundle is *.msi.zip. Each only
+            # exists when bundle.createUpdaterArtifacts is true in
+            # tauri.conf.json AND the matching target is built.
+            cp $BUNDLE/nsis/*.nsis.zip dist/ 2>/dev/null || true
+            cp $BUNDLE/nsis/*.nsis.zip.sig dist/ 2>/dev/null || true
+            cp $BUNDLE/nsis/*.exe.zip dist/ 2>/dev/null || true
+            cp $BUNDLE/nsis/*.exe.zip.sig dist/ 2>/dev/null || true
+            cp $BUNDLE/msi/*.msi.zip dist/ 2>/dev/null || true
+            cp $BUNDLE/msi/*.msi.zip.sig dist/ 2>/dev/null || true
           fi
           ls -la dist/
 
@@ -105,6 +154,12 @@ jobs:
         with:
           path: artifacts
 
+      - name: List downloaded artifacts (diagnostic)
+        shell: bash
+        run: |
+          find artifacts -type f -printf '%p (%s bytes)\n' 2>/dev/null \
+            || find artifacts -type f 2>/dev/null
+
       - name: Build update manifest
         shell: bash
         run: |
@@ -113,15 +168,25 @@ jobs:
           NOTES="${GITHUB_REF_NAME} release"
           PUB_BASE="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}"
 
-          # Find the macOS .app.tar.gz + signature (arm64 preferred for Apple Silicon)
-          MAC_ARM_SIG=$(cat artifacts/bundle-macos-arm64/*.app.tar.gz.sig 2>/dev/null | head -1 || echo "")
-          MAC_ARM_FILE=$(basename $(ls artifacts/bundle-macos-arm64/*.app.tar.gz 2>/dev/null | head -1) 2>/dev/null || echo "")
-          MAC_X64_SIG=$(cat artifacts/bundle-macos-x64/*.app.tar.gz.sig 2>/dev/null | head -1 || echo "")
-          MAC_X64_FILE=$(basename $(ls artifacts/bundle-macos-x64/*.app.tar.gz 2>/dev/null | head -1) 2>/dev/null || echo "")
+          # macOS updater bundles — now arch-specific thanks to the
+          # rename in the build job. Each platform's auto-update points
+          # at its own binary; no more cross-arch clobber.
+          MAC_ARM_FILE=$(basename "$(ls artifacts/bundle-macos-arm64/*macos-arm64.app.tar.gz 2>/dev/null | head -1)" 2>/dev/null || echo "")
+          MAC_ARM_SIG=$(cat artifacts/bundle-macos-arm64/*macos-arm64.app.tar.gz.sig 2>/dev/null | head -1 || echo "")
+          MAC_X64_FILE=$(basename "$(ls artifacts/bundle-macos-x64/*macos-x64.app.tar.gz 2>/dev/null | head -1)" 2>/dev/null || echo "")
+          MAC_X64_SIG=$(cat artifacts/bundle-macos-x64/*macos-x64.app.tar.gz.sig 2>/dev/null | head -1 || echo "")
 
-          # Find the Windows NSIS .nsis.zip + signature
-          WIN_SIG=$(cat artifacts/bundle-windows-x64/*.nsis.zip.sig 2>/dev/null | head -1 || echo "")
-          WIN_FILE=$(basename $(ls artifacts/bundle-windows-x64/*.nsis.zip 2>/dev/null | head -1) 2>/dev/null || echo "")
+          # Windows updater bundle — match either .exe.zip (current Tauri
+          # 2 naming) or .nsis.zip (older naming) so this works across
+          # Tauri version bumps.
+          WIN_FILE=$(basename "$(ls artifacts/bundle-windows-x64/*.exe.zip 2>/dev/null | head -1)" 2>/dev/null || echo "")
+          WIN_SIG=$(cat artifacts/bundle-windows-x64/*.exe.zip.sig 2>/dev/null | head -1 || echo "")
+          if [ -z "$WIN_FILE" ]; then
+            WIN_FILE=$(basename "$(ls artifacts/bundle-windows-x64/*.nsis.zip 2>/dev/null | head -1)" 2>/dev/null || echo "")
+            WIN_SIG=$(cat artifacts/bundle-windows-x64/*.nsis.zip.sig 2>/dev/null | head -1 || echo "")
+          fi
+
+          echo "Picked files: mac-arm=$MAC_ARM_FILE mac-x64=$MAC_X64_FILE win=$WIN_FILE"
 
           cat > latest.json <<EOF
           {
@@ -153,11 +218,12 @@ jobs:
         run: |
           set -e
           VERSION="${GITHUB_REF_NAME}"
-          # Flatten all bundle artifacts into one upload directory
+          # Flatten all bundle artifacts into one upload directory.
           mkdir -p upload
           find artifacts -type f \( -name '*.dmg' -o -name '*.msi' -o -name '*.exe' \
             -o -name '*.app.tar.gz' -o -name '*.app.tar.gz.sig' \
             -o -name '*.nsis.zip' -o -name '*.nsis.zip.sig' \
+            -o -name '*.exe.zip' -o -name '*.exe.zip.sig' \
             -o -name '*.msi.zip' -o -name '*.msi.zip.sig' \) -exec cp {} upload/ \;
           cp latest.json upload/
           ls -la upload/
