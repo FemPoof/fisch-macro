@@ -14,7 +14,7 @@ Both live in the **Totem** tab.
 | Re-equip rod after | on | Auto-presses fishing rod hotkey after totem |
 | Detection enabled | off | Optional: skip fire if totem is detected as still active |
 
-**Hotkey** is read from your **Hotkey Configuration → Special Totem** binding (default `7`).
+**Hotkey** is read from your **Hotkey Configuration → Special Totem** binding (default `3`).
 
 ### Active-totem detection (optional)
 
@@ -42,7 +42,7 @@ New in v2.2.0. Simpler than auto-totem — no detection step (potions don't have
 | Re-equip rod after | on | Same as totem |
 | Rod equip delay | 250 ms | Pause before swapping back to rod |
 
-**Hotkey** is read from your **Hotkey Configuration → Potion** binding (default `8`).
+**Hotkey** is read from your **Hotkey Configuration → Potion** binding (default `5`).
 
 ### Why no detection
 

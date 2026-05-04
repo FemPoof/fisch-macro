@@ -32,7 +32,7 @@ Structure:
     "Tryhard": {
       "kp": 0.45,
       "kd": 0.05,
-      "bar_arrow_color": "#dfacae",       // pinkish, per Hydra reference
+      "bar_arrow_color": "#dfacae",       // pinkish, this rod's arrow tint
       // ... overrides only the fields you want different
     }
   }
@@ -41,9 +41,9 @@ Structure:
 
 Fields you don't specify in a per-rod block fall back to the schema defaults. So you can keep per-rod blocks minimal — just the tuning that diverges.
 
-## Hydra arrow-color reference
+## Per-rod arrow-color reference
 
-The arrow tier (introduced in v2.1.10) needs to know each rod's arrow color. Hydra's reference table:
+The arrow tier (introduced in v2.1.10) needs to know each rod's arrow color. Field-tested values:
 
 | Rod | `bar_arrow_color` |
 |-----|-------------------|
@@ -79,7 +79,7 @@ For rods marked "(None)", set `bar_arrow_color: null` in the rod's tuning to dis
 
 ## Scan FPS per rod
 
-Hydra also has per-rod `scan_fps` overrides. The macro doesn't use these in v2.2.0 — capture rate is global (`capture_target_fps` in the top-level config). Per-rod `scan_fps` values in `RodTuning` are kept for backwards compat with v2.1.x configs but ignored by the runtime.
+Per-rod `scan_fps` overrides aren't currently honored by the runtime — capture rate is global (`capture_target_fps` in the top-level config). Per-rod `scan_fps` values in `RodTuning` are kept for backwards compat with v2.1.x configs but ignored at run time.
 
 To run a rod that needs faster capture (Masterline @ 420, Ruinous Oath @ 280), bump the global `capture_target_fps` while that rod is equipped. This will be addressed properly in a future version.
 

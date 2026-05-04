@@ -22,8 +22,9 @@ The first launch is harmless — you can browse the tabs, change settings, and e
 
 - Default rod tuning (kp=1.8, kd=0.75, panic=100, etc.) calibrated against current Fisch UI
 - Detection cascade pre-configured: `bgr → bgr_edges → arrow → template → carryover`
-- Hotkeys mapped to the standard inventory layout (rod=1, totem=7, potion=8)
+- Hotkeys mapped to the standard inventory layout (rod=1, equipment_bag=2, special_totem=3, sundial=4, potion=5, mystic_mirror=7)
 - Auto-totem and auto-potion both off (toggle on after configuring intervals)
+- Perfect Cast off (experimental, opt-in via the **Cast** tab)
 
 The only mandatory first-run task is calibrating the **fish bar region** — see [calibration.md](calibration.md).
 

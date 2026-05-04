@@ -6,7 +6,7 @@ Common failure modes and their fixes. If your issue isn't here, open a [GitHub i
 
 ### "Calibrate the fish bar region first."
 
-You haven't picked the region yet. **Main** tab → **Capture Region** card → **Pick Region**. See [calibration.md](calibration.md).
+You haven't picked the region yet. **Press F1** to open Calibrate Zones, then click **Edit** on **Fish Bar (the minigame catch bar)**. See [calibration.md](calibration.md).
 
 ### "Could not capture a frame."
 
@@ -27,7 +27,7 @@ Disable **Auto-focus Roblox** and **Auto-maximize Roblox** in the **Extra** tab 
 
 Your bar colors are off. Most likely cause: graphics setting changed since calibration, so the bar's rendered pixels shifted slightly and BGR matching is failing on the edges.
 
-**Fix**: open Fisch with the rod equipped, get a bar visible, and re-sample colors via **Main** tab → **Sample Colors** row. Click **Bar (left)**, then click on the bar's left-edge pixel; repeat for **Bar (right)**.
+**Fix**: open Fisch with the rod equipped, get a bar visible, and re-sample colors via **Fish** tab → **Color Options** card → **Sample colors from a captured frame** row. Click **Bar (left)**, then click on the bar's left-edge pixel; repeat for **Bar (right)**.
 
 ### `via_bgr` share is < 95 %
 
@@ -36,6 +36,17 @@ Same issue as above. Recalibrate `left_bar_color` / `right_bar_color`.
 ### `phantoms` count is high (> 50 per cycle)
 
 Your bar region includes panel chrome that's matching as a "phantom" bar. Re-pick the region with a tighter selection that excludes the panel borders.
+
+### `detect=` percentage is 70-80 % even on a clean run
+
+Expected on **lowest Roblox graphics**. The bar's white pixels are rendered with less anti-aliasing at low graphics, so the BGR cascade catches partial frames where it would normally hit clean ones. The arrow tier (fixed-color indicator on the bar's edge) absorbs the gap — look at `arrow=engaged=Nf` in the cycle summary; if `N` is non-zero, the cascade is working as designed.
+
+Field-tested on the 2026-05-02 230-cycle BetterCam session at lowest graphics:
+
+- mean detect % = 73, but mean abs error = 39 px (basically identical to the v2.2.0 reference run's 37 px on full graphics)
+- arrow tier rescued ~130 frames/cycle on 24 cycles where BGR couldn't keep up
+
+**`mean_abs` error is the better health indicator on low-graphics setups** — if it's still under 50 px the controller is fine, regardless of `detect=`. If `mean_abs` climbs above 60 too, recalibrate `left_bar_color` / `right_bar_color` and `bar_arrow_color` from a freshly-captured frame at your current graphics setting.
 
 ## Bar is detected but the controller fights it
 
@@ -65,17 +76,95 @@ If `mean_abs` is consistently > 60 even on simple fish, controller is the bottle
 
 ### Auto-totem fires once and then stops firing
 
-Detection bug — your `active_color` is matching UI chrome that's always present, so detection thinks the totem is permanently active. **Fix**: either disable detection (`Detection enabled` off in the Totem tab), or recalibrate the active color on a different pixel.
+Cycle is mid-run when the next interval expires; the runner waits for a "safe to swap items" window before firing. If the macro is in `Reel`/`Cast`/`WaitForBite`, the next totem fire is delayed until cooldown. Looks like "stopped firing" but is just waiting — check the Buffs tab for **Next fire in** countdown.
 
 ### Auto-potion never fires
 
-Most common cause: the **Potion** hotkey isn't bound. Check **Main** tab → **Hotkey Configuration** card → confirm the **Potion** field has a key (default `8`).
+Most common cause: the **Potion** hotkey isn't bound. Check **Main** tab → **Hotkey Configuration** card → confirm the **Potion** field has a key (default `5`).
 
-Also check the **Totem** tab → **Auto Potion** card → **Enabled** is on.
+Also check the **Buffs** tab → **Auto Potion** card → **Enabled** is on.
 
 ### Item swap mid-reel breaks cycles
 
 This shouldn't happen — both runners gate fires on safe state. If it's happening, your `safe_check` is reporting safe when the macro is mid-cycle. File an issue with your latest log; we'll look at the state machine transitions.
+
+## Auto rod-equip detector reports "rod missing" but pressing doesn't fix it
+
+If the macro's log shows entries like:
+
+```
+[WARNING] Rod-equip: backing off for 30s after 2 consecutive presses
+didn't take effect. Roblox may be unfocused, the keypress isn't
+reaching the game, or your detection zone / equipped color may need
+recalibration.
+```
+
+it means the detector pressed `1` but the post-press detection still
+read "rod missing" — so the keypress never landed. Most common causes:
+
+1. **Roblox lost foreground focus.** Pydirectinput sends keypresses
+   to whichever window has focus. If you alt-tabbed to a different
+   app, the rod hotkey goes there instead of Roblox. Re-focus
+   Roblox; the back-off automatically clears on the next macro cycle
+   (long unsafe windows count as "the situation may have resolved").
+   Enable **Auto-focus Roblox** in the **Extra** tab to make the
+   macro pull Roblox to the front automatically when it starts.
+2. **Detection zone / equipped color mis-calibrated.** When Roblox
+   is unfocused, the hotbar dims and the slot border color shifts.
+   If you calibrated the equipped color while Roblox was focused,
+   the dimmed-state color won't match — every poll reads "missing"
+   even when the rod is actually held. Re-pick the detection zone +
+   re-sample the equipped color, ideally while Roblox is in the
+   foreground state the macro will run in.
+3. **The hotbar slot moved.** If you rearranged your hotbar, slot 1
+   may not contain the rod anymore. Check **Main → Hotkeys → Fishing
+   Rod** — the macro presses whatever is bound there, not always `1`.
+
+Until the underlying cause is fixed, **the back-off prevents the
+detector from spam-pressing into a void** (or worse: toggling the
+rod off if focus comes back briefly between presses). It cools off
+for 30 seconds, or earlier if the macro stays in cycle for a while
+(safe-state transitions reset the back-off).
+
+If you're seeing the "rod un-equipped, macro not fishing" pattern
+without the back-off log line, the detector may not be catching it —
+file an issue with your latest log.
+
+## Lowest-graphics setups
+
+Running Roblox on lowest graphics ("Manual graphics quality 1") changes
+the bar's rendered appearance enough that some default thresholds
+become too strict. **The macro still works**, but expect:
+
+- **`detect %` averaging 70-80** instead of the documented 95-99 healthy
+  band. The arrow tier rescues most failure frames; cycle outcomes are
+  unaffected. **Use `mean_abs` as the better health indicator on low
+  graphics** — anything under 50 px is fine regardless of detect %.
+- **Higher no-bite rate** — the bar's first-frame appearance has fewer
+  cleanly-rendered white pixels, so the 3-frame consensus gate is
+  harder to satisfy within the 15 s wait window. Field-tested on
+  lowest graphics: ~18 % no-bite rate vs the ~2 % reference run on
+  full graphics.
+- **Higher stale-frame rate** — Roblox renders at a lower (and more
+  variable) FPS than the macro captures at. The cycle telemetry's
+  `fresh=N stale=K` will show 25-35 % stale on lowest. Doesn't impact
+  control quality.
+
+### Tuning to recover throughput on lowest graphics
+
+If you're losing 15-20 % of casts to no-bite timeouts:
+
+1. **Lower `bite_consensus_frames` from 3 to 2** in your rod tuning.
+   Hand-edit `%LOCALAPPDATA%\fisch-macro\config.json` and add
+   `"bite_consensus_frames": 2` to the active rod's tuning. Costs a
+   small false-bite-risk delta; the `bite_require_bgr=True` gate
+   (default on) keeps single-frame UI matches from triggering.
+2. If still bad, **lower `bite_min_width` from 200 to 160** — narrower
+   detected bars get accepted at first sight. Valid because lowest-
+   graphics anti-aliasing renders the bar slightly thinner.
+3. If you have GPU headroom, **raise Roblox graphics one notch**. The
+   `mean_abs` is already healthy, so existing control tuning carries
+   over without re-calibration.
 
 ## Performance
 

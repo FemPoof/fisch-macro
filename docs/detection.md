@@ -16,7 +16,7 @@ The macro tries detectors in order; first success wins. Default order: `bgr_firs
 
 **bgr_edges** is the partial-tint helper. When the bar is tinting but the white edges are still visible (e.g. early in a dash), this tier finds the outer edge pair and spans them. Same color rules, looser sub-region constraints.
 
-**Arrow** is the [Hydra](https://github.com/) reference macro's secret sauce. Fisch bars include a small directional arrow on either the left or right edge of the bar, rendered in a fixed per-rod color (default `#848587` medium grey). This color **does not tint during fish dashes** — the bar's white pixels go red/orange but the grey arrow stays grey. So the arrow tier is a perfectly reliable fallback when BGR fails on a tinted bar.
+**Arrow** exploits a Fisch UI detail: the catch-bar has a small directional arrow on either the left or right edge, rendered in a fixed per-rod color (default `#848587` medium grey). This color **does not tint during fish dashes** — the bar's white pixels go red/orange but the grey arrow stays grey. So the arrow tier is a reliable fallback when BGR fails on a tinted bar.
 
 **Template** captures a reference patch of the bar at the first clean BGR detection, then uses `cv2.matchTemplate(TM_CCOEFF_NORMED)` to find the bar in subsequent BGR-failure frames. Refreshes every ~750 ms during BGR-clean periods so the seed stays current. Cheaper than CSRT trackers, no drift. Kept as a **backstop** for rods that have `bar_arrow_color: None` (no usable arrow indicator).
 
@@ -61,4 +61,4 @@ In **Main** tab → **Detection Cascade** card:
 
 If your `via_bgr` share drops below 95 % consistently, the BGR colors are off — recalibrate your `left_bar_color` / `right_bar_color` from a fresh captured frame. The most common cause: graphics setting changed since calibration (each setting renders bar pixels slightly differently because of anti-aliasing).
 
-If `arrow=engaged` rises sharply on cycles you weren't catching, your rod might have a non-standard arrow color — check the [Hydra reference table](advanced.md#hydra-arrow-color-reference) and recalibrate `bar_arrow_color` for that rod.
+If `arrow=engaged` rises sharply on cycles you weren't catching, your rod might have a non-standard arrow color — check the [per-rod arrow-color reference](advanced.md#per-rod-arrow-color-reference) and recalibrate `bar_arrow_color` for that rod.

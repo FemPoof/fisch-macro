@@ -62,16 +62,21 @@ offline VM — capture and input both work fine without internet.
 
 ## Antivirus warnings
 
-Some antivirus products flag PyInstaller / Nuitka-built binaries as
-suspicious because they bundle a Python interpreter and execute
-bytecode at startup. This is a generic heuristic, not a real
-detection. If your AV flags `fisch-macro.exe`, you can:
+Some antivirus products flag Nuitka-built binaries as suspicious
+because they bundle a Python interpreter, combine input-simulation
+APIs with screen capture, and ship unsigned. None of those flags
+are signature-based — every reputable signature engine clears the
+binary. If your AV flags `fisch-macro.exe`, you can:
 
 1. Verify the SHA-256 hash on the [Releases][releases] page matches
-   the file you downloaded (releases are signed with a fixed SHA-256
-   per build).
+   the file you downloaded.
 2. Submit the file to [VirusTotal](https://virustotal.com) for a
    second opinion.
-3. Add an exception in your AV.
+3. Read [docs/FALSE_POSITIVES.md][fp] for the full breakdown of
+   which engines flag, what their labels actually mean, three
+   independent verification paths, and what we're doing about it
+   (vendor false-positive submissions, code-signing on the roadmap).
+4. Add an exception in your AV (only after verifying the SHA-256).
 
 [releases]: https://github.com/FemPoof/fisch-macro/releases
+[fp]: docs/FALSE_POSITIVES.md
