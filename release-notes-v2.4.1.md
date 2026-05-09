@@ -1,6 +1,6 @@
 # fisch-macro v2.4.1
 
-Hotfix release. Three UX bugs in v2.4.0 that surfaced once users started downloading the binary. No detection / controller / capture changes — same fishing pipeline, same overnight numbers (3,864 cycles, 97.4% catch rate).
+Hotfix release. Four UX bugs in v2.4.0 / the first v2.4.1 build that surfaced once users started downloading the binary. No detection / controller / capture changes — same fishing pipeline, same overnight numbers (3,864 cycles, 97.4% catch rate).
 
 ## What's fixed
 
@@ -30,6 +30,21 @@ Perfect Cast, Buffs, and Reconnect previously sat in the tab bar with a locked-s
 Fix: `MainWindow._refresh_premium_tabs()` adds / removes those tabs from the QTabWidget based on `is_premium_unlocked()`. Mirrors the Developer-tab pattern (constructed once, attached / detached on license change). Free-tier users now see exactly four tabs: Main / Cast / Fish / Settings. Premium users see seven: Main / Cast / **Perfect Cast** / Fish / **Buffs** / **Reconnect** / Settings. Dev-key users get **Developer** appended to the end.
 
 Each premium tab keeps its internal locked-state placeholder as dead-code safety net in case a future code path adds the tab without checking premium.
+
+### 4. EXE-only theme fix (late add to v2.4.1)
+
+After v2.4.1 shipped, users reported the **downloaded EXE** still rendered with white modal backgrounds and *"all the text and stuff is super messed up"* — but running the same source from Python locally looked correct. Two compounding issues, both invisible from source but exposed by the PyInstaller build:
+
+- The stylesheet was being set on `MainWindow` instead of `QApplication`. `QWidget.setStyleSheet` only cascades to that widget's tree; standalone modal dialogs created without an explicit parent are siblings of MainWindow at the QApplication level and inherit the app stylesheet, which was empty. In source builds the platform style gave them a passable look anyway; in the frozen build it didn't.
+- Qt's default style depends on platform-style plugins (`windows11`, `windowsvista`) whose discovery is fragile in PyInstaller frozen builds. When they fail to load, the underlying widget rendering doesn't compose well with QSS.
+
+Fixes in `__main__._run_gui`:
+
+- `app.setStyle("Fusion")` forces the Fusion style as the BASE. Fusion is built directly into QtWidgets (no plugin discovery required), so it always loads identically across source and frozen builds.
+- `app.setStyleSheet(STYLESHEET)` applies the dark theme at the QApplication level so every dialog regardless of parent picks it up via the cascade.
+- `MainWindow.setStyleSheet(STYLESHEET)` retained as belt-and-suspenders for any caller (tests, custom CLIs) that constructs MainWindow without going through `_run_gui`.
+
+The current EXE on the [Releases page](https://github.com/FemPoof/fisch-macro/releases/tag/v2.4.1) carries this fix.
 
 ## Upgrading
 
