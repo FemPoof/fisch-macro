@@ -4,6 +4,14 @@ Minor release with one detection breakthrough, a major UX consolidation, and a p
 
 Overnight unattended run on this version: **3,864 cycles, 97.4% catch rate** (1440p / BetterCam / Default rod).
 
+## 2026-05-09 hotfixes (in this same release tag)
+
+Three quick UX bugs landed and were re-released under the same v2.4.0 tag. The current `fisch-macro.exe` on the [Releases page](https://github.com/FemPoof/fisch-macro/releases/tag/v2.4.0) carries all three; the SHA-256 there is the authoritative one for what to verify against.
+
+1. **License-activation flow.** The "Pro features unlocked" success dialog was modal and rendered on top of a still-not-yet-refreshed Settings tab — users saw "Free Tier" + no Pro pill *behind* the success dialog and concluded activation had silently failed. Status / pill / Developer-tab now refresh BEFORE the dialog appears, so the post-state is visible underneath the confirmation. Dev keys also no longer get a misleading hardware binding stored.
+2. **Dialog dark-theme styling.** `QMessageBox` / `QInputDialog` / `QDialog` were never covered by the QSS, so every modal in the app (license success, "key not recognized" warnings, "Clear zone?" confirmations, Add Rod prompt, etc.) rendered with stark white backgrounds against the otherwise-dark UI. Now consistent.
+3. **Premium tabs hidden from free-tier users.** Perfect Cast, Buffs, Reconnect previously sat in the tab bar with a locked-state placeholder behind them; users found that confusing. They now only appear when premium is active. Mirrors the Developer-tab pattern. Order is unchanged for premium users; free users see Main / Cast / Fish / Settings.
+
 ## What's new
 
 ### 1. Live-tint sampling — replaces the static `danger_bar_color` list
