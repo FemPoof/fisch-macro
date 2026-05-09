@@ -11,13 +11,22 @@ how to verify the binary is safe.
 
 ## The current scan
 
+> The VirusTotal scan below was run on the **v2.3.0** build. The
+> v2.4.0 EXE on the [Releases][releases] page has a **different**
+> SHA-256 (it's a fresh build with new features) but the same
+> structural traits trigger the same heuristics, so the qualitative
+> result is expected to match. The hash to verify against your
+> download lives on the v2.4.0 release notes itself, not here.
+
 | Field | Value |
 |---|---|
-| File | `fisch-macro.exe` |
+| File | `fisch-macro.exe` (v2.3.0) |
 | Size | 83.09 MB |
 | SHA-256 | `317042e24ca7f002415ae85c9d73bf056aeefb1efb4433613b64632d6a98d160` |
 | Result | **7/61** vendors flagged (heuristic / ML only) |
 | VirusTotal | https://www.virustotal.com/gui/file/317042e24ca7f002415ae85c9d73bf056aeefb1efb4433613b64632d6a98d160 |
+
+[releases]: https://github.com/FemPoof/fisch-macro/releases
 
 The vendors that flagged it and what their labels actually mean:
 
