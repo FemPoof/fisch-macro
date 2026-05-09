@@ -5,11 +5,13 @@ minigame via DXGI Desktop Duplication, predicts fish movement, and drives
 mouse input through a PWM-PD controller with non-linear gain to keep the bar
 locked on target.
 
-> **Status:** v2.4.0 stable + Perfect Cast (experimental).
+> **Status:** v2.4.1 stable + Perfect Cast (experimental).
 > Reel/control pipeline is production-ready and 1440p-calibrated out
-> of the box; an overnight 3864-cycle run on v2.4.0 hit a 97.4%
-> catch rate. Perfect Cast is opt-in and needs per-setup tuning —
-> see [docs/perfect-cast.md](docs/perfect-cast.md). Other resolutions
+> of the box; an overnight 3864-cycle run on the v2.4.x stack hit a
+> 97.4% catch rate. v2.4.1 is a UX hotfix release on top of v2.4.0
+> (license activation flow, dialog dark-theme styling, premium-tab
+> gating). Perfect Cast is opt-in and needs per-setup tuning — see
+> [docs/perfect-cast.md](docs/perfect-cast.md). Other resolutions
 > need a one-time bar-region re-pick via the in-app F1 calibrator.
 
 > **Disclaimer:** Automation tools may violate Roblox's Terms of
